@@ -4,6 +4,7 @@
 # Author: weinull
 
 import os
+import re
 import time
 import base64
 import logging
@@ -50,13 +51,15 @@ class GithubSearch(object):
     sleep_time: 当请求受限时暂停的时间
     proxies: HTTP请求代理配置
     download_folder: 搜索到的文件保存目录
+    download_flag: 是否下载保存搜索到的文件
     search_page_max: 最大搜索页数
     error_data_log: data_check函数出错时是否记录处理出错的数据,数据base64编码处理
+    output_file: 自定义输出文件
     """
 
     def __init__(self):
-        self.login_account = 'account'
-        self.login_password = 'password'
+        self.login_account = ''
+        self.login_password = ''
 
         self.keyword = ''
 
@@ -67,6 +70,7 @@ class GithubSearch(object):
         self.download_domain = 'https://raw.githubusercontent.com'
 
         self.download_folder = './downloads'
+        self.download_flag = True
 
         self.rq = requests.Session()
         self.timeout = 15
@@ -77,11 +81,11 @@ class GithubSearch(object):
                           ' Chrome/72.0.3626.121 Safari/537.36'
         }
         self.proxies = {
-            'http': '',
-            'https': ''
         }
 
         self.error_data_log = False
+
+        self.output_file = open('output_{}.txt'.format(int(time.time())), 'a')
 
     def http_get(self, url):
         try:
@@ -159,7 +163,8 @@ class GithubSearch(object):
             for file_url in self.get_file_url(result.text):
                 self.download_file(file_url)
         logging.info('Search Done')
-        logging.info('Download File Save Path: {}/{}'.format(self.download_folder, self.keyword))
+        if self.download_flag:
+            logging.info('Download File Save Path: {}/{}'.format(self.download_folder, self.keyword))
 
     def get_file_url(self, page_data):
         # 获取页面数据中的Code页面URL
@@ -174,32 +179,36 @@ class GithubSearch(object):
         download_url = file_url.replace(self.github_domain, self.download_domain).replace('blob/', '')
         save_path = '{}/{}/{}'.format(self.download_folder, self.keyword,
                                       download_url.replace(self.download_domain + '/', ''))
-        # 检查对应的多级目录是否存在,不存在则创建
-        if not os.path.isdir(os.path.split(save_path)[0]):
-            os.makedirs(os.path.split(save_path)[0])
-        # 下载文件,同时在文件开头加入文件在Github中的URL
-        logging.info('Download File: {}'.format(file_url))
-        add_data = '{flag} Github URL {flag}\n\n{url}\n\n{flag} Github URL {flag}'.format(flag='#' * 30, url=file_url)
+        if self.download_flag:
+            logging.info('Download File: {}'.format(file_url))
         file_data = self.http_get(download_url).text
-        if self.data_check(file_data):
-            with open(save_path, 'w') as f:
-                f.write('{}\n\n\n\n\n{}'.format(add_data, file_data))
-            logging.info('Save File: {}'.format(save_path))
+        logging.info('Data Check: {}'.format(file_url))
+        if self.data_check(file_data, file_url):
+            if self.download_flag:
+                # 检查对应的多级目录是否存在,不存在则创建
+                if not os.path.isdir(os.path.split(save_path)[0]):
+                    os.makedirs(os.path.split(save_path)[0])
+                # 下载文件同时在文件开头加入文件在Github中的URL
+                add_data = '{flag} Github URL {flag}\n\n{url}\n\n{flag} Github URL {flag}'.format(flag='#' * 30,
+                                                                                                  url=file_url)
+                with open(save_path, 'w') as f:
+                    f.write('{}\n\n\n\n\n{}'.format(add_data, file_data))
+                logging.info('Save File: {}'.format(save_path))
         else:
-            logging.warning('Data Check False')
+            logging.info('Data Check False')
 
-    def data_check(self, data):
+    def data_check(self, file_data, file_url):
         # 对文件数据进行单独处理
         try:
             return_flag = False
             # 检查下载的文件中是否包含搜索的keyword
-            if self.keyword in data:
+            if self.keyword in file_data:
                 return_flag = True
             return return_flag
         except Exception as e:
             logging.error('Data Check - {}'.format(e))
             if self.error_data_log:
-                logging.error('Error Data: {}'.format(base64.b64encode(str(data).encode()).decode()))
+                logging.error('Error Data: {}'.format(base64.b64encode(str(file_data).encode()).decode()))
             return False
 
 
